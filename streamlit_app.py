@@ -1,56 +1,101 @@
+import subprocess
+import sys
 import streamlit as st
-from openai import OpenAI
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+# Function to install a package using pip
+def install_package(package):
+    """Installs a package using pip."""
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+# Try to import together and install if not found
+try:
+    from together import Together  # Assuming this is the correct import for Together API
+    print("together is already installed.")
+except ImportError:
+    print("together not found. Installing...")
+    install_package("together")  # Install together
+    from together import Together  # Re-import after installation
+    print("together has been installed.")
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+# Streamlit interface for the chatbot
+def main():
+    # Check and print the API key to verify it's loaded correctly
+    api_key = st.secrets["Together_API_Key"]["key"]
+    st.write(f"API Key: {api_key}")  # Print the API key to Streamlit app
+    print(f"API Key: {api_key}")  # Print the API key to the terminal (for debugging)
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    # Initialize the Together client with the API key from Streamlit secrets
+    together_client = Together(api_key=api_key)
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
-
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
+    # Function to create the system prompt for the assistant
+    def create_system_prompt():
+        return (
+            "You are Støker, a sarcastic, grumpy, and witty AI chatbot. You provide responses where you brutally roast people to pieces. "
+            "Your tone is playful, teasing, and edgy. You use casual language, friendly but edgy insults, and humor to engage. "
+            "No emojis allowed—just raw, unfiltered sarcasm. "
+            "Always end your responses with a helpful twist or a friendly piece of useful and insightful advice. "
+            "Do **not** repeat the user's question in your response, just give a witty, sarcastic reply. "
+            "Always answer in a moderately concise way, but don't be afraid to go into detail if it's funny."
         )
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+    # Initialize conversation history as an empty list if it's the first time
+    if 'messages' not in st.session_state:
+        st.session_state.messages = []
+
+    # Display the chatbot's title
+    st.title("Støker - First AI advisor that might get cancelled")
+    st.markdown("Chat with **Støker**, Beware this AI advisor is not for snowflakes! He will roast you! Type a safeword to end the conversation. The safewords are 'exit', 'quit', or 'stop'.")
+
+    # Capture user input
+    user_input = st.text_input("You: ", "")
+
+    if user_input:
+        # Check for exit commands and add exit message to the history
+        if user_input.lower() in ["exit", "quit", "stop"]:
+            # Add the response for quitting directly to the session state
+            st.session_state.messages.append({"role": "assistant", "content": "Finally, some peace and quiet! Don't let the door hit you on the way out!"})
+            # Display only the exit response
+            st.markdown(f"**Støker**: {st.session_state.messages[-1]['content']}")
+            return  # Prevent further processing, exit immediately
+
+        # Add the user's input to the conversation history
+        st.session_state.messages.append({"role": "user", "content": user_input})
+
+        # Only pass the most recent conversation history (1 user message + 1 assistant response) for context
+        conversation_history = st.session_state.messages[-2:]  # Include last two messages
+
+        try:
+            # Create a chat completion request, including conversation history as context
+            response = together_client.chat.completions.create(
+                model="meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": create_system_prompt()
+                    }
+                ] + conversation_history,  # Only pass the last user + assistant pair for context
+                max_tokens=699,
+                temperature=0.11,  # Low temperature for less random answers
+                top_p=1,  # Nucleus sampling
+                top_k=50,  # Top K sampling to limit choices
+                repetition_penalty=1,  # Prevent repetition
+                stop=["<|eot_id|>"]
+            )
+
+            # Get the assistant's response
+            assistant_response = response.choices[0].message.content
+            st.session_state.messages.append({"role": "assistant", "content": assistant_response})
+
+        except Exception as e:
+            st.error(f"Oops! Something went wrong: {e}")
+
+    # Display the latest assistant response only (not the entire history)
+    if len(st.session_state.messages) > 0:
+        # Only display the most recent assistant response
+        latest_message = st.session_state.messages[-1]
+        if latest_message["role"] == "assistant":
+            st.markdown(f"**Støker**: {latest_message['content']}")
+
+# Run the Streamlit app
+if __name__ == "__main__":
+    main()
