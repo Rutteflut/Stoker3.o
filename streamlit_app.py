@@ -9,6 +9,21 @@ def install_package(package):
     """Installs a package using pip."""
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
+# Install necessary dependencies for pyarrow (CMake and libomp)
+def install_dependencies():
+    """Installs dependencies required to build pyarrow and related packages."""
+    try:
+        # Check if cmake and libomp are installed, install if missing
+        subprocess.check_call(["brew", "install", "cmake"])
+        subprocess.check_call(["brew", "install", "libomp"])
+    except subprocess.CalledProcessError as e:
+        st.error(f"Failed to install required system dependencies. {e}")
+
+# Upgrade pip and setuptools
+def upgrade_pip():
+    """Upgrades pip and setuptools to avoid installation issues."""
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
+
 # Try to import together and install if not found
 try:
     from together import Together  # Assuming this is the correct import for Together API
@@ -21,13 +36,14 @@ except ImportError:
 
 # Streamlit interface for the chatbot
 def main():
+    # Install required system dependencies and upgrade pip
+    install_dependencies()
+    upgrade_pip()
+
     # Check and print the API key to verify it's loaded correctly
     api_key = st.secrets["Together_API_Key"]["key"]
     st.write(f"API Key: {api_key}")  # Print the API key to Streamlit app
     print(f"API Key: {api_key}")  # Print the API key to the terminal (for debugging)
-
-    # Initialize the Together client with the API key from Streamlit secrets
-    # together_client = Together(api_key=api_key)  # Not using this directly; using requests now
 
     # Function to create the system prompt for the assistant
     def create_system_prompt():
