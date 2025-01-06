@@ -1,6 +1,8 @@
 import subprocess
 import sys
 import streamlit as st
+import requests
+import json
 
 # Function to install a package using pip
 def install_package(package):
@@ -25,7 +27,7 @@ def main():
     print(f"API Key: {api_key}")  # Print the API key to the terminal (for debugging)
 
     # Initialize the Together client with the API key from Streamlit secrets
-    together_client = Together(api_key=api_key)
+    # together_client = Together(api_key=api_key)  # Not using this directly; using requests now
 
     # Function to create the system prompt for the assistant
     def create_system_prompt():
@@ -64,27 +66,39 @@ def main():
         # Only pass the most recent conversation history (1 user message + 1 assistant response) for context
         conversation_history = st.session_state.messages[-2:]  # Include last two messages
 
-        try:
-            # Create a chat completion request, including conversation history as context
-            response = together_client.chat.completions.create(
-                model="meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": create_system_prompt()
-                    }
-                ] + conversation_history,  # Only pass the last user + assistant pair for context
-                max_tokens=699,
-                temperature=0.11,  # Low temperature for less random answers
-                top_p=1,  # Nucleus sampling
-                top_k=50,  # Top K sampling to limit choices
-                repetition_penalty=1,  # Prevent repetition
-                stop=["<|eot_id|>"]
-            )
+        # API Request URL and headers
+        url = "https://api.together.xyz/v1/completions"  # Replace with actual Together API URL
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
 
-            # Get the assistant's response
-            assistant_response = response.choices[0].message.content
-            st.session_state.messages.append({"role": "assistant", "content": assistant_response})
+        # Construct the payload with the system prompt and user history
+        payload = {
+            "model": "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",  # Model name (replace if needed)
+            "messages": [
+                {"role": "system", "content": create_system_prompt()}
+            ] + conversation_history,  # Pass conversation history
+            "max_tokens": 699,
+            "temperature": 0.11,  # Adjust temperature as needed
+            "top_p": 1,
+            "top_k": 50,
+            "repetition_penalty": 1,
+            "stop": ["<|eot_id|>"]
+        }
+
+        try:
+            # Send a POST request to the Together API
+            response = requests.post(url, headers=headers, json=payload)
+
+            if response.status_code == 200:
+                response_data = response.json()
+                # Extract the assistant's response
+                assistant_response = response_data['choices'][0]['text']
+                st.session_state.messages.append({"role": "assistant", "content": assistant_response})
+            else:
+                # Handle any API error
+                st.error(f"Error {response.status_code}: {response.text}")
 
         except Exception as e:
             st.error(f"Oops! Something went wrong: {e}")
